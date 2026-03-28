@@ -1,0 +1,45 @@
+{
+  "databases": {
+    "ga_traffic_sources": {
+      "metadata": {
+        "name": "GA Traffic Sources",
+        "description": "Sessions by date, source, medium, and campaign."
+      },
+      "type": "file",
+      "path": "data/google-analytics/traffic_sources/date=*/*.parquet",
+      "format": "parquet"
+    },
+    "ga_page_views": {
+      "metadata": {
+        "name": "GA Page Views",
+        "description": "Page-level traffic and engagement by date, path, and title."
+      },
+      "type": "file",
+      "path": "data/google-analytics/page_views/date=*/*.parquet",
+      "format": "parquet"
+    },
+    "ga_events": {
+      "metadata": {
+        "name": "GA Events",
+        "description": "Event counts and per-user rates by date and event name."
+      },
+      "type": "file",
+      "path": "data/google-analytics/events/date=*/*.parquet",
+      "format": "parquet"
+    },
+    "ga_user_segments": {
+      "metadata": {
+        "name": "GA User Segments",
+        "description": "Sessions by date, country, device, browser, and OS."
+      },
+      "type": "file",
+      "path": "data/google-analytics/user_segments/date=*/*.parquet",
+      "format": "parquet"
+    }
+  },
+  "semantic_context": {
+    "overlays": [
+      "plydb-overlay.yaml"
+    ]
+  }
+}

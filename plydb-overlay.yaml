@@ -1,0 +1,451 @@
+version: "1.0"
+
+semantic_model:
+  - name: Google Analytics Overlay
+    description: Semantic enrichment for Google Analytics 4 data downloaded via the Google Analytics Data API.
+    ai_context:
+      instructions: |
+        Key GA4 conventions and encoding rules:
+
+        Rates and durations:
+        - bounceRate is a decimal between 0 and 1 (not a percentage). Multiply by 100 for display.
+          A session is a bounce if no engagement event fires within 10 seconds of the session start.
+        - averageSessionDuration is in seconds. Divide by 60 for minutes.
+
+        User counts:
+        - totalUsers counts unique users (deduplicated within the scope of each row).
+        - newUsers counts users visiting for the first time in the date range.
+        - sessions counts total sessions; a single user can have multiple sessions.
+        - Do not SUM totalUsers across rows to get overall unique users — use COUNT DISTINCT
+          or SUM only when aggregating mutually exclusive segments.
+
+        Unattributed traffic:
+        - sessionSource = "(direct)" and sessionMedium = "(none)" means direct or dark traffic —
+          visitors who typed the URL directly, used a bookmark, or came from a source that did
+          not pass referrer information (e.g. many messaging apps, email clients).
+        - "(not set)" in any dimension means GA4 could not determine a value.
+
+        Standard GA4 auto-collected events present in this dataset:
+        - page_view: fired on every page load
+        - session_start: fired at the start of each session
+        - user_engagement: fired when the page is in focus for 1+ seconds (marks non-bounce)
+        - first_visit: fired on a user's first ever visit
+        - scroll: fired when a user scrolls 90% down a page
+        - click: fired on outbound link clicks (if enhanced measurement is enabled)
+
+        Table structure:
+        - All four tables share the date dimension and can be aggregated to any time
+          granularity using DATE_TRUNC('week', date), DATE_TRUNC('month', date), etc.
+        - The tables are separate GA4 report extracts, not a normalized fact/dimension schema.
+          There are no join keys between them.
+
+    datasets:
+      - name: ga_traffic_sources.default.ga_traffic_sources
+        source: ga_traffic_sources.default.ga_traffic_sources
+        description: >
+          Daily sessions broken down by landing page, traffic source, medium, and campaign.
+          Use this table for channel performance analysis, campaign attribution,
+          organic vs paid vs direct traffic comparisons, and understanding which
+          pages different traffic sources enter the site on.
+        primary_key: [date, landingPage, sessionSource, sessionMedium, sessionCampaignName]
+        fields:
+          - name: date
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: date
+            dimension:
+              is_time: true
+            description: Date of the sessions.
+
+          - name: landingPage
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: landingPage
+            description: >
+              URL path of the first page viewed in the session (e.g. "/docs/quickstart/").
+              Query string parameters are excluded — use this to understand where different
+              traffic sources enter the site.
+            ai_context:
+              synonyms:
+                - entry page
+                - landing page
+                - first page
+
+          - name: sessionSource
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: sessionSource
+            description: >
+              The traffic source — the domain or origin that referred the session
+              (e.g. "google", "linkedin.com", "reddit.com"). "(direct)" means no
+              referrer was detected.
+            ai_context:
+              synonyms:
+                - source
+                - referrer
+                - traffic source
+
+          - name: sessionMedium
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: sessionMedium
+            description: >
+              The marketing medium (e.g. "organic", "referral", "cpc", "email").
+              "(none)" pairs with source "(direct)" for unattributed traffic.
+            ai_context:
+              synonyms:
+                - medium
+                - channel type
+
+          - name: sessionCampaignName
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: sessionCampaignName
+            description: >
+              UTM campaign name from the landing URL (e.g. "spring_promo").
+              "(not set)" when no utm_campaign parameter was present.
+            ai_context:
+              synonyms:
+                - campaign
+                - utm_campaign
+
+          - name: sessions
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: sessions
+            description: Total number of sessions from this source/medium/campaign on this date.
+
+          - name: totalUsers
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: totalUsers
+            description: Unique users from this source/medium/campaign on this date.
+
+          - name: newUsers
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: newUsers
+            description: First-time visitors from this source/medium/campaign on this date.
+
+          - name: bounceRate
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: bounceRate
+            description: >
+              Fraction of sessions with no engagement event (decimal 0–1).
+              Multiply by 100 for percentage. Lower is better.
+
+          - name: averageSessionDuration
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: averageSessionDuration
+            description: Average session duration in seconds for this source/medium/campaign.
+
+      - name: ga_page_views.default.ga_page_views
+        source: ga_page_views.default.ga_page_views
+        description: >
+          Daily page-level traffic and engagement by URL path and page title.
+          Use this table for content performance analysis, landing page evaluation,
+          and identifying high- or low-engagement pages.
+        primary_key: [date, pagePath, pageTitle]
+        fields:
+          - name: date
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: date
+            dimension:
+              is_time: true
+            description: Date of the page views.
+
+          - name: pagePath
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: pagePath
+            description: >
+              The URL path of the page, excluding the domain (e.g. "/docs/quickstart/").
+              Query string parameters are stripped by default.
+            ai_context:
+              synonyms:
+                - page
+                - URL
+                - path
+
+          - name: pageTitle
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: pageTitle
+            description: The HTML <title> of the page as seen by GA4.
+            ai_context:
+              synonyms:
+                - title
+                - page name
+
+          - name: screenPageViews
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: screenPageViews
+            description: Total number of times this page was viewed (including repeat views by the same user).
+            ai_context:
+              synonyms:
+                - views
+                - page views
+                - pageviews
+
+          - name: sessions
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: sessions
+            description: Number of sessions that included at least one view of this page.
+
+          - name: totalUsers
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: totalUsers
+            description: Unique users who viewed this page on this date.
+
+          - name: bounceRate
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: bounceRate
+            description: >
+              Fraction of sessions that viewed this page but had no engagement event (decimal 0–1).
+              Multiply by 100 for percentage.
+
+          - name: averageSessionDuration
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: averageSessionDuration
+            description: Average duration in seconds of sessions that included this page.
+
+      - name: ga_events.default.ga_events
+        source: ga_events.default.ga_events
+        description: >
+          Daily event counts by event name. Events are the core unit of measurement in GA4 —
+          every interaction (page view, scroll, click, custom action) is an event.
+          Use this table for engagement analysis and funnel investigation.
+        primary_key: [date, eventName]
+        fields:
+          - name: date
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: date
+            dimension:
+              is_time: true
+            description: Date the events were fired.
+
+          - name: eventName
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: eventName
+            description: >
+              Name of the GA4 event. Auto-collected events in this dataset:
+              page_view (every page load), session_start (start of session),
+              user_engagement (page in focus 1+ sec — marks session as non-bounce),
+              first_visit (first ever visit), scroll (90% page scroll),
+              click (outbound link click).
+            ai_context:
+              synonyms:
+                - event
+                - action
+                - interaction
+
+          - name: eventCount
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: eventCount
+            description: Total number of times this event was fired on this date.
+
+          - name: totalUsers
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: totalUsers
+            description: Number of unique users who fired this event on this date.
+
+          - name: eventCountPerUser
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: eventCountPerUser
+            description: >
+              Average number of times this event was fired per user on this date.
+              Useful for measuring repeat engagement (e.g. average pages viewed per user).
+
+      - name: ga_user_segments.default.ga_user_segments
+        source: ga_user_segments.default.ga_user_segments
+        description: >
+          Daily sessions broken down by user geography and device/technology.
+          Use this table for audience analysis — device mix, geographic reach,
+          and browser/OS distribution.
+        primary_key: [date, country, deviceCategory, browser, operatingSystem]
+        fields:
+          - name: date
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: date
+            dimension:
+              is_time: true
+            description: Date of the sessions.
+
+          - name: country
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: country
+            description: >
+              Country of the user as determined by IP geolocation
+              (e.g. "United States", "Germany", "Brazil").
+            ai_context:
+              synonyms:
+                - geography
+                - location
+                - geo
+
+          - name: deviceCategory
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: deviceCategory
+            description: >
+              Device type: "desktop", "mobile", or "tablet".
+              In this dataset only "desktop" and "mobile" are present.
+            ai_context:
+              synonyms:
+                - device
+                - device type
+
+          - name: browser
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: browser
+            description: Web browser name (e.g. "Chrome", "Safari", "Firefox").
+
+          - name: operatingSystem
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: operatingSystem
+            description: Operating system name (e.g. "Android", "iOS", "Windows", "Macintosh").
+            ai_context:
+              synonyms:
+                - OS
+                - platform
+
+          - name: sessions
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: sessions
+            description: Sessions from this country/device/browser/OS combination on this date.
+
+          - name: totalUsers
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: totalUsers
+            description: Unique users from this segment on this date.
+
+          - name: newUsers
+            expression:
+              dialects:
+                - dialect: ANSI_SQL
+                  expression: newUsers
+            description: First-time visitors from this segment on this date.
+
+    metrics:
+      - name: total_sessions
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: SUM(sessions)
+        description: Total number of sessions. Apply to any table that has a sessions column.
+
+      - name: total_users
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: SUM(totalUsers)
+        description: >
+          Sum of unique users within each row's scope. Note: summing across rows does not
+          deduplicate users who appear in multiple rows — use for relative comparisons,
+          not absolute unique visitor counts.
+
+      - name: new_user_rate
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: SUM(newUsers) * 1.0 / NULLIF(SUM(totalUsers), 0)
+        description: >
+          Fraction of users who are first-time visitors (0–1). Multiply by 100 for percentage.
+          High new user rate = acquisition-heavy audience; low = strong returning audience.
+        ai_context:
+          synonyms:
+            - new visitor rate
+            - first-time visitor rate
+
+      - name: bounce_rate_pct
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: AVG(bounceRate) * 100
+        description: >
+          Session-weighted average bounce rate as a percentage (0–100).
+          Apply to ga_traffic_sources or ga_page_views.
+          For a sessions-weighted average, use SUM(bounceRate * sessions) / NULLIF(SUM(sessions), 0) * 100.
+        ai_context:
+          synonyms:
+            - bounce rate
+
+      - name: avg_session_duration_min
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: AVG(averageSessionDuration) / 60.0
+        description: >
+          Average session duration in minutes. Apply to ga_traffic_sources or ga_page_views.
+          For a sessions-weighted average, use SUM(averageSessionDuration * sessions) / NULLIF(SUM(sessions), 0) / 60.0.
+        ai_context:
+          synonyms:
+            - session duration
+            - time on site
+
+      - name: total_page_views
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: SUM(screenPageViews)
+        description: Total page views. Apply to ga_page_views.
+        ai_context:
+          synonyms:
+            - pageviews
+            - views
+
+      - name: pages_per_session
+        expression:
+          dialects:
+            - dialect: ANSI_SQL
+              expression: SUM(screenPageViews) * 1.0 / NULLIF(SUM(sessions), 0)
+        description: Average number of pages viewed per session. Apply to ga_page_views.
