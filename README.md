@@ -1,5 +1,9 @@
 # Google Analytics AI Starter
 
+Accompanying [blog post](https://www.plydb.com/blog/plydb-example-google-analytics/).
+
+---
+
 Chat with your Google Analytics 4 Data.
 
 [PlyDB](https://www.plydb.com/) — the universal database gateway for AI agents —
